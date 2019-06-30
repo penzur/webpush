@@ -69,6 +69,20 @@ func main() {
 	)
 }
 
+func index(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, base64.RawURLEncoding.EncodeToString(publicKey(vapid)))
+}
+
+func register(w http.ResponseWriter, r *http.Request) {
+	var sub subscription
+	_ = json.NewDecoder(r.Body).Decode(&sub)
+
+	log.Println("registered: ", sub.Keys.Auth)
+	subscriptions[sub.Keys.Auth] = &sub
+
+	fmt.Fprintln(w, sub.Keys.Auth+" registered with "+sub.Keys.P256dh)
+}
+
 func notify(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(":id")
 	msg := r.URL.Query().Get("msg")
@@ -125,24 +139,10 @@ func vapidToken(endpoint, email string) string {
 	return str
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, base64.RawURLEncoding.EncodeToString(publicKey(vapid)))
-}
-
 func publicKey(prvk *ecdsa.PrivateKey) []byte {
 	return elliptic.Marshal(
 		prvk.Curve,
 		prvk.PublicKey.X,
 		prvk.PublicKey.Y,
 	)
-}
-
-func register(w http.ResponseWriter, r *http.Request) {
-	var sub subscription
-	_ = json.NewDecoder(r.Body).Decode(&sub)
-
-	log.Println("registered: ", sub.Keys.Auth)
-	subscriptions[sub.Keys.Auth] = &sub
-
-	fmt.Fprintln(w, sub.Keys.Auth+" registered with "+sub.Keys.P256dh)
 }
