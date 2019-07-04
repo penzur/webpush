@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -88,7 +89,9 @@ func notify(w http.ResponseWriter, r *http.Request) {
 	vh := vapidHeader(s)
 	req.Header.Set("Authorization", vh)
 	req.Header.Set("TTL", "3")
+	req.Header.Set("Content-Length", strconv.Itoa(len(msg)))
 	req.Header.Set("Content-Encoding", "aes128gcm")
+	req.Header.Set("Content-Type", "application/octet-stream")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -1,15 +1,15 @@
 # webpush
 
-Trying out web push
+Webpush Demo Arigatou! 🙊
 
-### Resources
+### Drafts
 
-**Web Push Drafts Links**
-
-- [Webpush Encryption](https://tools.ietf.org/html/draft-ietf-webpush-encryption-09)
+- [Webpush Encryption](https://tools.ietf.org/html/rfc8291)
 - [Vapid Protocol](https://tools.ietf.org/html/rfc8292)
+- [Encrypted Content-Encoding](https://tools.ietf.org/html/rfc8188)
 
 
 ### Todo
 
-- Message encryption with ECDH
+- Content Payload
+- Content Headers

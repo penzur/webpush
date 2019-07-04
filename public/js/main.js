@@ -18,7 +18,6 @@ const endpoint = 'http://localhost:3000';
 
 const opts = {
   userVisibleOnly: true,
-  applicationServerKey: ''
 };
 
 (async () => {
@@ -31,7 +30,6 @@ const opts = {
 
     let subscription = await sw.pushManager.getSubscription();
     if (!subscription) {
-      console.log('subscribing...');
       subscription = await sw.pushManager.subscribe(opts);
     }
 
