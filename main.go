@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -86,16 +85,17 @@ func notify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pl, _ := encrypt(msg, s.Keys.P256dh, s.Keys.Auth)
 	req, _ := http.NewRequest(
 		http.MethodPost,
 		s.Endpoint,
-		encrypt(msg, s.Keys.P256dh, s.Keys.Auth),
+		pl,
 	)
 
 	vh := vapidHeader(s)
+
 	req.Header.Set("Authorization", vh)
-	req.Header.Set("TTL", "3")
-	req.Header.Set("Content-Length", "0")
+	req.Header.Set("TTL", "60")
 	req.Header.Set("Content-Encoding", "aes128gcm")
 	req.Header.Set("Content-Type", "application/octet-stream")
 
@@ -112,12 +112,13 @@ func notify(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func encrypt(msg, public, secret string) *bytes.Buffer {
+func encrypt(msg, public, secret string) (*bytes.Buffer, int) {
 	curve := elliptic.P256()
 	// generate private key
 	private, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
-		return nil
+		log.Println(err.Error())
+		return nil, 0
 	}
 
 	// public key from private
@@ -126,13 +127,15 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 	// unmarshal public key
 	publicBytes, err := base64.RawURLEncoding.DecodeString(public)
 	if err != nil {
-		return nil
+		log.Println(err.Error())
+		return nil, 0
 	}
 
 	// unmarshall secret
 	secretBytes, err := base64.RawURLEncoding.DecodeString(secret)
 	if err != nil {
-		return nil
+		log.Println(err.Error())
+		return nil, 0
 	}
 
 	// derived from public and our private
@@ -145,11 +148,10 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 
 	// key info
 	keyInfo := bytes.NewBuffer([]byte{})
-	keyInfo.WriteString("Webpush: info")
-	keyInfo.WriteByte(0)
+	keyInfo.WriteString("Webpush: info\x00")
 	keyInfo.Write(publicBytes)
 	keyInfo.Write(localPublicBytes)
-	keyInfo.WriteByte(1)
+	keyInfo.WriteByte(0x01)
 
 	// ikm
 	ikm := hkdf.Expand(sha256.New, keyBytes, keyInfo.Bytes())
@@ -165,9 +167,8 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 
 	// cek info
 	cekInfo := bytes.NewBuffer([]byte{})
-	cekInfo.WriteString("Content-Encoding: aes128gcm")
-	cekInfo.WriteByte(0)
-	cekInfo.WriteByte(1)
+	cekInfo.WriteString("Content-Encoding: aes128gcm\x00")
+	cekInfo.WriteByte(0x01)
 
 	// cek
 	cek := hkdf.Expand(sha256.New, prkBytes, cekInfo.Bytes())
@@ -176,9 +177,8 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 
 	// nonce info
 	nonceInfo := bytes.NewBuffer([]byte{})
-	nonceInfo.WriteString("Content-Encoding: nonce")
-	nonceInfo.WriteByte(0)
-	nonceInfo.WriteByte(1)
+	nonceInfo.WriteString("Content-Encoding: nonce\x00")
+	nonceInfo.WriteByte(0x01)
 
 	// nonce
 	nonceReader := hkdf.Expand(sha256.New, prkBytes, nonceInfo.Bytes())
@@ -188,21 +188,20 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 	// start encryption
 	block, err := aes.NewCipher(cekBytes)
 	if err != nil {
-		return nil
+		log.Println(err.Error())
+		return nil, 0
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil
+		log.Println(err.Error())
+		return nil, 0
 	}
 
 	// msg buffer
 	msgBuff := bytes.NewBuffer([]byte{})
 	msgBuff.WriteString(msg)
-	msgBuff.WriteByte(2)
-
-	// record and record size
-	record := aesgcm.Seal(nil, nonceBytes, msgBuff.Bytes(), nil)
+	msgBuff.WriteByte(0x02)
 
 	// header
 	headerBytes := make([]byte, 21+65)
@@ -211,19 +210,25 @@ func encrypt(msg, public, secret string) *bytes.Buffer {
 	headerBytes[20] = byte(65)
 	copy(headerBytes[21:], publicBytes)
 
-	log.Println(len(headerBytes))
+	// paddding
+	padl := 3994 - msgBuff.Len()
+	padBytes := make([]byte, padl)
+	msgBuff.Write(padBytes)
+
+	// record and record size
+	record := aesgcm.Seal([]byte{}, nonceBytes, msgBuff.Bytes(), nil)
 
 	payload := bytes.NewBuffer([]byte{})
 	payload.Write(headerBytes)
 	payload.Write(record)
 
-	return payload
+	return payload, payload.Len()
 }
 
 func uintBytes(n uint32) []byte {
-	buf := bytes.NewBuffer([]byte{})
-	_ = binary.Write(buf, binary.BigEndian, n)
-	return buf.Bytes()
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, n)
+	return b
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +255,7 @@ func getPublicKey(prvk *ecdsa.PrivateKey) []byte {
 
 func vapidToken(endpoint, email string) string {
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, &jwt.MapClaims{
-		"aud": strings.Replace(endpoint, "fcm/send", "wp", -1),
+		"aud": endpoint,
 		"exp": time.Now().Add(1 * time.Hour).Unix(),
 		"sub": fmt.Sprintf("mailto:%s", email),
 	})
